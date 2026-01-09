@@ -1,0 +1,5 @@
+% 演算子 / 括弧対 / コメントの定義
+op('%%', 40, xfy).
+pair('begin','end').
+comment('//').
+keyword('loop').

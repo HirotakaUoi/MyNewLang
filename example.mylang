@@ -1,0 +1,4 @@
+loop begin
+var 猫😀_1 = 12E3 + "hello" // c
+x <- y %% z
+end
