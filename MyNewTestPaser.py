@@ -7,11 +7,43 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from MyNewTokenAnalyzer import build_definition_set, tokenize_with_definitions, tokenize_lines
 
+DEBUG = bool(os.environ.get("MYNEW_DEBUG"))
+
+
+def _debug(message):
+    if DEBUG:
+        print(message)
+
 
 class ParseError(Exception):
     def __init__(self, message, token=None):
         super().__init__(message)
         self.token = token
+
+
+def _format_token(tok):
+    if tok is None:
+        return "EOF"
+    kind, value, start, end = tok
+    return f"{kind} {value!r} at {start}"
+
+
+def _make_snippet(source, pos_tuple, width=80):
+    idx, line, col = pos_tuple
+    lines = source.splitlines()
+    if line - 1 < 0 or line - 1 >= len(lines):
+        return ""
+    text = lines[line - 1]
+    if len(text) > width:
+        start = max(0, col - 1 - width // 2)
+        end = min(len(text), start + width)
+        view = text[start:end]
+        caret_pos = col - 1 - start
+    else:
+        view = text
+        caret_pos = col - 1
+    caret_line = " " * max(0, caret_pos) + "^"
+    return f"{view}\n{caret_line}"
 
 
 def _strip_comment(line):
@@ -93,16 +125,16 @@ def _standard_ops():
 
 
 def _build_operator_table(source_path=None, module_extension=".mydef"):
-    op_specs = {lex: (prec, assoc) for lex, prec, assoc in _standard_ops()}
+    op_specs = list(_standard_ops())
     if source_path:
         for lex, prec, assoc in _load_module_ops(source_path, module_extension):
-            op_specs[lex] = (prec, assoc)
+            op_specs.append((lex, prec, assoc))
 
     infix: Dict[str, Tuple[int, str]] = {}
     prefix: Dict[str, Tuple[int, str]] = {}
     postfix: Dict[str, Tuple[int, str]] = {}
 
-    for lex, (prec, assoc) in op_specs.items():
+    for lex, prec, assoc in op_specs:
         if assoc in ("xfy", "yfx", "xfx"):
             infix[lex] = (prec, assoc)
         elif assoc in ("fx", "fy"):
@@ -126,7 +158,7 @@ _NODE_FIELDS = {
     "DEFVAR": ["items"],
     "ARRAY": ["name", "dims", "indices"],
     "ARRAYPARAM": ["name", "dims"],
-    "BLOCK": ["items", "begin", "end"],
+    "BLOCK": ["items"],
     "IF": ["cond", "then", "else_"],
     "WHILE": ["cond", "body"],
     "FOR": ["init", "cond", "update", "body"],
@@ -229,6 +261,12 @@ class TokenStream:
             raise ParseError(f"Expected {value}", tok)
         self.index += 1
         return tok
+
+    def match_punc(self, value):
+        return self.match("PUNC", value)
+
+    def expect_punc(self, value):
+        return self.expect("PUNC", value)
 
     def match_lexeme(self, value):
         tok = self.peek()
@@ -349,13 +387,9 @@ class Parser:
             raise ParseError("Expected block start", self.stream.peek())
         open_lexeme, close_lexeme = pair
         items = self.parse_statements(close_lexeme)
+        _debug(f"parse_block: expect close={close_lexeme}, next={self.stream.peek()}")
         self.stream.expect_lexeme(close_lexeme)
-        return node(
-            "BLOCK",
-            items=items,
-            begin=self._begin_tag(open_lexeme),
-            end=self._end_tag(close_lexeme),
-        )
+        return node("BLOCK", items=items)
 
     def parse_statements(self, close_lexeme=None):
         items = []
@@ -366,7 +400,7 @@ class Parser:
         expr = self.parse_expression_optional(close_lexeme)
         if expr is not None:
             items.append(expr)
-        while self.stream.match("OP", ";"):
+        while self.stream.match_punc(";"):
             expr = self.parse_expression_optional(close_lexeme)
             if expr is not None:
                 items.append(expr)
@@ -376,7 +410,7 @@ class Parser:
         tok = self.stream.peek()
         if tok is None:
             return None
-        if tok[0] == "OP" and tok[1] == ";":
+        if tok[0] == "PUNC" and tok[1] == ";":
             return None
         if close_lexeme and tok[1] == close_lexeme:
             return None
@@ -489,9 +523,9 @@ class Parser:
         self.stream.expect_word("for")
         self.stream.expect("OP", "(")
         init = self.parse_expression_optional()
-        self.stream.expect("OP", ";")
+        self.stream.expect_punc(";")
         cond = self.parse_expression_optional()
-        self.stream.expect("OP", ";")
+        self.stream.expect_punc(";")
         update = self.parse_expression_optional()
         self.stream.expect("OP", ")")
         body = self.parse_expression_optional()
@@ -504,7 +538,7 @@ class Parser:
         params = []
         if not self.stream.match("OP", ")"):
             params.append(self.parse_func_param())
-            while self.stream.match("OP", ","):
+            while self.stream.match_punc(","):
                 params.append(self.parse_func_param())
             self.stream.expect("OP", ")")
         body = self.parse_block()
@@ -514,7 +548,7 @@ class Parser:
         name_tok = self.stream.expect("IDENT")
         if self.stream.match("OP", "["):
             count = 0
-            while self.stream.match("OP", ","):
+            while self.stream.match_punc(","):
                 count += 1
             self.stream.expect("OP", "]")
             return node("ARRAYPARAM", name=name_tok[1], dims=count + 1)
@@ -523,7 +557,7 @@ class Parser:
     def parse_defvar(self):
         self.stream.expect_word("var")
         items = [self.parse_array_or_var()]
-        while self.stream.match("OP", ","):
+        while self.stream.match_punc(","):
             items.append(self.parse_array_or_var())
         return node("DEFVAR", items=items)
 
@@ -534,6 +568,12 @@ class Parser:
 
     def parse_wait(self):
         self.stream.expect_word("wait")
+        if self.stream.match("OP", "("):
+            if self.stream.match("OP", ")"):
+                return node("WAIT", value=[])
+            value = self.parse_expression()
+            self.stream.expect("OP", ")")
+            return node("WAIT", value=value)
         value = self.parse_expression_optional()
         return node("WAIT", value=value if value is not None else [])
 
@@ -568,6 +608,7 @@ class Parser:
             expr = self.parse_expression()
             self.stream.expect("OP", ")")
             return expr
+        _debug(f"parse_factor: unexpected token {tok}")
         raise ParseError("Unexpected token in factor", tok)
 
     def parse_funcall(self):
@@ -578,8 +619,10 @@ class Parser:
         self.stream.expect("OP", "(")
         args = []
         if not self.stream.match("OP", ")"):
+            _debug(f"parse_funcall_from({name}): first arg token {self.stream.peek()}")
             args.append(self.parse_expression())
-            while self.stream.match("OP", ","):
+            while self.stream.match_punc(","):
+                _debug(f"parse_funcall_from({name}): next arg token {self.stream.peek()}")
                 args.append(self.parse_expression())
             self.stream.expect("OP", ")")
         return node("FUNCALL", name=name, args=args)
@@ -592,10 +635,25 @@ class Parser:
 
     def parse_array_from(self, name):
         self.stream.expect("OP", "[")
-        indices = [self.parse_expression()]
-        while self.stream.match("OP", ","):
+        indices = []
+        expecting_expr = True
+        while True:
+            tok = self.stream.peek()
+            if tok is None:
+                raise ParseError("Unexpected EOF in array index", tok)
+            if tok[0] == "OP" and tok[1] == "]":
+                if expecting_expr:
+                    indices.append(None)
+                self.stream.consume()
+                break
+            if tok[0] == "PUNC" and tok[1] == ",":
+                if expecting_expr:
+                    indices.append(None)
+                self.stream.consume()
+                expecting_expr = True
+                continue
             indices.append(self.parse_expression())
-        self.stream.expect("OP", "]")
+            expecting_expr = False
         return node("ARRAY", name=name, dims=len(indices), indices=indices)
 
     def make_binary(self, op, left, right):
@@ -608,6 +666,11 @@ class Parser:
 def parse_tokens(tokens, source_path=None, module_extension=".mydef"):
     parser = Parser(tokens, source_path=source_path, module_extension=module_extension)
     return to_tuple(parser.parse())
+
+
+def parse_tokens_ast(tokens, source_path=None, module_extension=".mydef"):
+    parser = Parser(tokens, source_path=source_path, module_extension=module_extension)
+    return parser.parse()
 
 
 def parse(source, source_path=None, module_extension=".mydef", start_pos=(0, 1, 1)):
@@ -630,11 +693,146 @@ def parse_file(file_path, module_extension=".mydef", start_pos=(0, 1, 1)):
     return parse_lines(lines, source_path=file_path, module_extension=module_extension, start_pos=start_pos)
 
 
+def parse_ast(source, source_path=None, module_extension=".mydef", start_pos=(0, 1, 1)):
+    tokens = tokenize_with_definitions(
+        source, source_path=source_path or "", module_extension=module_extension, start_pos=start_pos
+    )
+    return parse_tokens_ast(tokens, source_path=source_path, module_extension=module_extension)
+
+
+def _tree_lines(value, indent=0):
+    pad = "  " * indent
+    if value is None:
+        return [pad + "None"]
+    if isinstance(value, dict):
+        node_type = value.get("type", "UNKNOWN")
+        lines = [pad + str(node_type)]
+        fields = _NODE_FIELDS.get(node_type, [])
+        for field in fields:
+            child = value.get(field)
+            if isinstance(child, list):
+                lines.append(pad + "  " + field + ":")
+                if not child:
+                    lines.append(pad + "    " + "[]")
+                for item in child:
+                    lines.extend(_tree_lines(item, indent + 3))
+            else:
+                lines.append(pad + "  " + field + ":")
+                lines.extend(_tree_lines(child, indent + 3))
+        return lines
+    if isinstance(value, list):
+        if not value:
+            return [pad + "[]"]
+        lines = [pad + "[]"]
+        for item in value:
+            lines.extend(_tree_lines(item, indent + 1))
+        return lines
+    return [pad + repr(value)]
+
+
+def format_tree(ast):
+    return "\n".join(_tree_lines(ast))
+
+
+def _tuple_tree_lines(value, indent=0):
+    pad = "  " * indent
+    if value is None:
+        return [pad + "None"]
+    if isinstance(value, list):
+        if not value:
+            return [pad + "[]"]
+        lines = []
+        for item in value:
+            lines.extend(_tuple_tree_lines(item, indent + 1))
+        return lines
+    if isinstance(value, tuple) and value:
+        node_type = value[0]
+        fields = _NODE_FIELDS.get(node_type)
+        if fields is None:
+            return [pad + repr(value)]
+        inline_parts = []
+        child_fields = []
+        for field, child in zip(fields, value[1:]):
+            is_child = False
+            if isinstance(child, list):
+                is_child = True
+            elif isinstance(child, tuple) and child:
+                child_type = child[0]
+                if child_type in _NODE_FIELDS:
+                    is_child = True
+            if is_child:
+                child_fields.append((field, child))
+            else:
+                inline_parts.append(f"{field}={repr(child)}")
+        header = str(node_type)
+        if inline_parts:
+            header += " " + " ".join(inline_parts)
+        lines = [pad + header]
+        for field, child in child_fields:
+            if isinstance(child, tuple) and child and child[0] in _NODE_FIELDS:
+                nested_lines = _tuple_tree_lines(child, indent + 2)
+                if nested_lines:
+                    first = nested_lines[0].lstrip()
+                    lines.append(pad + "  " + field + ": " + first)
+                    base = "  " * (indent + 2)
+                    for extra in nested_lines[1:]:
+                        tail = extra
+                        if tail.startswith(base):
+                            tail = tail[len(base):]
+                        lines.append(pad + "    " + tail)
+                continue
+            if isinstance(child, list) and not child:
+                lines.append(pad + "  " + field + ": []")
+                continue
+            lines.append(pad + "  " + field + ":")
+            lines.extend(_tuple_tree_lines(child, indent + 2))
+        return lines
+    return [pad + repr(value)]
+
+
+def format_tuple_tree(ast_tuple):
+    return "\n".join(_tuple_tree_lines(ast_tuple))
+
+
 if __name__ == "__main__":
     import sys
 
     print("My New Test Parser (Parser Combinator Style)")
-    source_text = sys.stdin.read()
-    if source_text:
-        ast = parse(source_text)
-        print(ast)
+    last_source = None
+    while True:
+        try:
+            if sys.stdin.isatty():
+                print("Input program (empty line = repeat, Ctrl-D = end):")
+            line = sys.stdin.readline()
+        except KeyboardInterrupt:
+            break
+        if line == "":
+            break
+        if line == "\n":
+            if last_source is None:
+                continue
+            source_text = last_source
+        else:
+            source_text = line + sys.stdin.read()
+            last_source = source_text
+        if source_text:
+            try:
+                ast_tuple = parse(source_text)
+                print(format_tuple_tree(ast_tuple))
+            except Exception as exc:
+                print(f"Parse failed: {exc}")
+                try:
+                    tokens = tokenize_with_definitions(source_text, source_path="")
+                except Exception as lex_exc:
+                    print(f"Lexing failed: {lex_exc}")
+                    continue
+                err_tok = None
+                if isinstance(exc, ParseError):
+                    err_tok = exc.token
+                if err_tok is None and tokens:
+                    err_tok = tokens[-1]
+                print(f"Error token: {_format_token(err_tok)}")
+                if err_tok is not None:
+                    snippet = _make_snippet(source_text, err_tok[2])
+                    if snippet:
+                        print(snippet)
