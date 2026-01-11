@@ -414,11 +414,12 @@ class Tokenizer:
 
             # 数値リテラル: [0-9]+ または [0-9]+E[0-9]+
             if is_digit(ch):
+                start_i = i
                 start = current_pos()
                 advance(1)
                 while i < length and is_digit(source[i]):
                     advance(1)
-                mantissa = source[start.index:i]
+                mantissa = source[start_i:i]
                 value = int(mantissa)
                 if i + 1 < length and source[i] == "E" and is_digit(source[i + 1]):
                     advance(1)  # consume E
@@ -450,12 +451,13 @@ class Tokenizer:
 
             # 標準識別子: [A-Za-z_][A-Za-z0-9_]*
             if is_ident_start(ch):
+                start_i = i
                 start = current_pos()
                 advance(1)
                 while i < length and is_ident_char(source[i]):
                     advance(1)
                 end = current_pos()
-                value = source[start.index:end.index]
+                value = source[start_i:i]
                 kind = classify_identifier(value, start)
                 emit(kind, value, start, end)
                 continue
@@ -463,12 +465,13 @@ class Tokenizer:
             # $ から始まる識別子: $[A-Za-z0-9]+
             if ch == "$":
                 if i + 1 < length and is_dollar_ident_char(source[i + 1]):
+                    start_i = i
                     start = current_pos()
                     advance(1)
                     while i < length and is_dollar_ident_char(source[i]):
                         advance(1)
                     end = current_pos()
-                    value = source[start.index:end.index]
+                    value = source[start_i:i]
                     kind = classify_identifier(value, start)
                     emit(kind, value, start, end)
                     continue
@@ -481,9 +484,10 @@ class Tokenizer:
                     break
             start = current_pos()
             if matched is None:
+                start_i = i
                 advance(1)
                 end = current_pos()
-                emit("PUNC", source[start.index:end.index], start, end)
+                emit("PUNC", source[start_i:i], start, end)
             else:
                 advance(len(matched))
                 end = current_pos()
@@ -534,6 +538,38 @@ def tokenize_lines(
             start_pos=start_pos,
         )
     return tokenize(source, keywords=keywords, start_pos=start_pos)
+
+
+def _advance_pos_by_text(start_pos: PositionTuple, text: str) -> PositionTuple:
+    idx, line, col = start_pos
+    idx += len(text)
+    if "\n" in text:
+        parts = text.split("\n")
+        line += len(parts) - 1
+        col = len(parts[-1]) + 1
+    else:
+        col += len(text)
+    return (idx, line, col)
+
+
+def tokenize_line(
+    line,
+    operators=None,
+    pairs=None,
+    comments=None,
+    keywords=None,
+    start_pos: PositionTuple = (0, 1, 1),
+):
+    tokens = tokenize(
+        line,
+        operators=operators,
+        pairs=pairs,
+        comments=comments,
+        keywords=keywords,
+        start_pos=start_pos,
+    )
+    next_pos = _advance_pos_by_text(start_pos, line)
+    return tokens, next_pos
 
 
 if __name__ == "__main__":

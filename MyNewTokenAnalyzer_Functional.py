@@ -424,10 +424,11 @@ class FunctionalTokenizer:
             src = state.source
             if state.index >= len(src) or not _is_digit(src[state.index]):
                 return None
+            start_idx = state.index
             start_pos = _current_pos(state)
             cur = _advance(state, 1)
             _, cur = _take_while(cur, _is_digit)
-            mantissa = src[start_pos.index:cur.index]
+            mantissa = src[start_idx:cur.index]
             value = int(mantissa)
             if cur.index + 1 < len(src) and src[cur.index] == "E" and _is_digit(src[cur.index + 1]):
                 cur = _advance(cur, 1)
@@ -462,10 +463,11 @@ class FunctionalTokenizer:
             src = state.source
             if state.index >= len(src) or not _is_ident_start(src[state.index]):
                 return None
+            start_idx = state.index
             start_pos = _current_pos(state)
             cur = _advance(state, 1)
             _, cur = _take_while(cur, _is_ident_char)
-            value = src[start_pos.index:cur.index]
+            value = src[start_idx:cur.index]
             kind = self._classify_identifier(value, start_pos)
             return Token(kind, value, start_pos, _current_pos(cur)), cur
         return run
@@ -477,10 +479,11 @@ class FunctionalTokenizer:
                 return None
             if state.index + 1 >= len(src) or not _is_dollar_ident_char(src[state.index + 1]):
                 return None
+            start_idx = state.index
             start_pos = _current_pos(state)
             cur = _advance(state, 1)
             _, cur = _take_while(cur, _is_dollar_ident_char)
-            value = src[start_pos.index:cur.index]
+            value = src[start_idx:cur.index]
             kind = self._classify_identifier(value, start_pos)
             return Token(kind, value, start_pos, _current_pos(cur)), cur
         return run
@@ -493,10 +496,11 @@ class FunctionalTokenizer:
                 if src.startswith(op, state.index):
                     matched = op
                     break
+            start_idx = state.index
             start_pos = _current_pos(state)
             if matched is None:
                 cur = _advance(state, 1)
-                value = src[start_pos.index:cur.index]
+                value = src[start_idx:cur.index]
                 return Token("PUNC", value, start_pos, _current_pos(cur)), cur
             cur = _advance(state, len(matched))
             return Token("OP", matched, start_pos, _current_pos(cur)), cur
@@ -591,6 +595,38 @@ def tokenize_lines(
             start_pos=start_pos,
         )
     return tokenize(source, keywords=keywords, start_pos=start_pos)
+
+
+def _advance_pos_by_text(start_pos: PositionTuple, text: str) -> PositionTuple:
+    idx, line, col = start_pos
+    idx += len(text)
+    if "\n" in text:
+        parts = text.split("\n")
+        line += len(parts) - 1
+        col = len(parts[-1]) + 1
+    else:
+        col += len(text)
+    return (idx, line, col)
+
+
+def tokenize_line(
+    line,
+    operators=None,
+    pairs=None,
+    comments=None,
+    keywords=None,
+    start_pos: PositionTuple = (0, 1, 1),
+):
+    tokens = tokenize(
+        line,
+        operators=operators,
+        pairs=pairs,
+        comments=comments,
+        keywords=keywords,
+        start_pos=start_pos,
+    )
+    next_pos = _advance_pos_by_text(start_pos, line)
+    return tokens, next_pos
 
 
 if __name__ == "__main__":

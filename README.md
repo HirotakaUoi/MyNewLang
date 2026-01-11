@@ -1,4 +1,4 @@
-# MyNewLang トークナイザ
+# MyNewLang README
 
 このフォルダには，新しい言語向けの字句解析器が含まれます。
 
@@ -14,7 +14,9 @@
 
 - `break` `continue` `do` `else` `for` `if` `return` `while`
 
-## 使い方（簡単）
+## 字句解析
+
+### 使い方（簡単）
 
 ```python
 from MyNewTokenAnalyzer import tokenize_with_definitions
@@ -36,6 +38,41 @@ tokens = tokenize(
     start_pos=(120, 10, 5),
 )
 ```
+
+## パーサー
+
+文法仕様は `MyNewTestPaser.md` を参照してください。
+
+### 使い方（バッチ/対話）
+
+### バッチモード
+
+テキストをまとめて解析する関数:
+
+```python
+from MyNewTestPaser import batch_parse_text
+
+source = "program test { var a; a = 1; }"
+batch_parse_text(source)
+```
+
+ファイルパスを渡す関数:
+
+```python
+from MyNewTestPaser import batch_parse_file
+
+batch_parse_file("path/to/example.mylang")
+```
+
+### 対話モード
+
+```
+python3 MyNewLang/MyNewTestPaser.py
+```
+
+対話中のコマンド:
+- `:batch` バッチモードに切り替え
+- `:interactive` 対話モードに戻す
 
 ## 定義ファイル形式（.mydef）
 

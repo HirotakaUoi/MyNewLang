@@ -5,7 +5,12 @@ from dataclasses import dataclass
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
-from MyNewTokenAnalyzer import build_definition_set, tokenize_with_definitions, tokenize_lines
+from MyNewTokenAnalyzer import (
+    build_definition_set,
+    tokenize_line,
+    tokenize_with_definitions,
+    tokenize_lines,
+)
 
 DEBUG = bool(os.environ.get("MYNEW_DEBUG"))
 
@@ -794,45 +799,168 @@ def format_tuple_tree(ast_tuple):
     return "\n".join(_tuple_tree_lines(ast_tuple))
 
 
-if __name__ == "__main__":
-    import sys
+class ParserSession:
+    def __init__(self, source_path=None, module_extension=".mydef", start_pos=(0, 1, 1)):
+        self.source_path = source_path
+        self.module_extension = module_extension
+        self.tokens = []
+        self.source_text = ""
+        self.next_pos = start_pos
+        self.operators, self.pairs, self.comments, self.keywords = build_definition_set(
+            source_path, module_extension
+        )
 
-    print("My New Test Parser (Parser Combinator Style)")
-    last_source = None
+    def feed_line(self, line):
+        tokens, self.next_pos = tokenize_line(
+            line,
+            operators=self.operators,
+            pairs=self.pairs,
+            comments=self.comments,
+            keywords=self.keywords,
+            start_pos=self.next_pos,
+        )
+        self.tokens.extend(tokens)
+        self.source_text += line
+        results = []
+        error_info = None
+
+        while self.tokens:
+            parser = Parser(self.tokens, source_path=self.source_path, module_extension=self.module_extension)
+            try:
+                first = parser.stream.peek()
+                if first is not None and first[0] in ("KEYWORD", "IDENT") and first[1] == "program":
+                    prog = parser.parse_program()
+                    consumed = parser.stream.index
+                    results.append(to_tuple(prog))
+                    self.tokens = self.tokens[consumed:]
+                    continue
+                expr = parser.parse_expression_optional()
+                if expr is None:
+                    break
+                if parser.stream.match_punc(";"):
+                    consumed = parser.stream.index
+                    results.append(to_tuple(expr))
+                    self.tokens = self.tokens[consumed:]
+                    continue
+                if parser.stream.peek() is None:
+                    consumed = parser.stream.index
+                    results.append(to_tuple(expr))
+                    self.tokens = self.tokens[consumed:]
+                    continue
+                error_info = f"Unexpected token: {_format_token(parser.stream.peek())}"
+                self.tokens = []
+                break
+            except ParseError as exc:
+                if exc.token is None:
+                    break
+                error_info = f"{exc} at {_format_token(exc.token)}"
+                snippet = _make_snippet(self.source_text, exc.token[2])
+                if snippet:
+                    error_info += "\n" + snippet
+                self.tokens = []
+                break
+        return results, error_info
+
+
+def batch_parse_text(source_text, source_path=None, module_extension=".mydef", start_pos=(0, 1, 1)):
+    try:
+        ast_tuple = parse(source_text, source_path=source_path, module_extension=module_extension, start_pos=start_pos)
+        print(format_tuple_tree(ast_tuple))
+    except Exception as exc:
+        print(f"Parse failed: {exc}")
+        try:
+            tokens = tokenize_with_definitions(source_text, source_path=source_path or "")
+        except Exception as lex_exc:
+            print(f"Lexing failed: {lex_exc}")
+            return
+        err_tok = None
+        if isinstance(exc, ParseError):
+            err_tok = exc.token
+        if err_tok is None and tokens:
+            err_tok = tokens[-1]
+        print(f"Error token: {_format_token(err_tok)}")
+        if err_tok is not None:
+            snippet = _make_snippet(source_text, err_tok[2])
+            if snippet:
+                print(snippet)
+
+
+def batch_parse_file(file_path, module_extension=".mydef", start_pos=(0, 1, 1)):
+    with open(file_path, "r", encoding="utf-8") as f:
+        source_text = f.read()
+    batch_parse_text(
+        source_text,
+        source_path=file_path,
+        module_extension=module_extension,
+        start_pos=start_pos,
+    )
+
+
+def interactive_parse():
+    session = ParserSession()
+    last_line = None
+    buffered_source = ""
+    buffered_tokens = []
+    first_prompt = True
+    mode = "interactive"
     while True:
         try:
-            if sys.stdin.isatty():
-                print("Input program (empty line = repeat, Ctrl-D = end):")
+            if first_prompt:
+                print("Input line (empty line = repeat, Ctrl-D = end):", flush=True)
+                first_prompt = False
+            print(f"({session.next_pos[1]}):> ", end="", flush=True)
             line = sys.stdin.readline()
         except KeyboardInterrupt:
             break
         if line == "":
-            break
-        if line == "\n":
-            if last_source is None:
-                continue
-            source_text = last_source
-        else:
-            source_text = line + sys.stdin.read()
-            last_source = source_text
-        if source_text:
+            buffered_source = session.source_text
+            buffered_tokens = list(session.tokens)
+            if buffered_source or buffered_tokens:
+                print(f"Buffered {len(buffered_source)} chars, {len(buffered_tokens)} tokens.")
             try:
-                ast_tuple = parse(source_text)
-                print(format_tuple_tree(ast_tuple))
-            except Exception as exc:
-                print(f"Parse failed: {exc}")
-                try:
-                    tokens = tokenize_with_definitions(source_text, source_path="")
-                except Exception as lex_exc:
-                    print(f"Lexing failed: {lex_exc}")
-                    continue
-                err_tok = None
-                if isinstance(exc, ParseError):
-                    err_tok = exc.token
-                if err_tok is None and tokens:
-                    err_tok = tokens[-1]
-                print(f"Error token: {_format_token(err_tok)}")
-                if err_tok is not None:
-                    snippet = _make_snippet(source_text, err_tok[2])
-                    if snippet:
-                        print(snippet)
+                sys.stdin = open("/dev/tty")
+                session.next_pos = (0, 1, 1)
+                continue
+            except OSError:
+                break
+        if line == "\n":
+            if last_line is None:
+                continue
+            line = last_line
+        else:
+            last_line = line
+
+        stripped = line.strip()
+        if stripped == ":batch":
+            mode = "batch"
+            print("Mode: batch")
+            continue
+        if stripped == ":interactive":
+            mode = "interactive"
+            print("Mode: interactive")
+            continue
+
+        if mode == "interactive":
+            results, error_info = session.feed_line(line)
+            for ast in results:
+                print(format_tuple_tree(ast))
+            if error_info:
+                print(f"Parse failed: {error_info}")
+        else:
+            buffered_source += line
+            session.source_text = buffered_source
+            session.tokens = []
+            session.next_pos = (0, 1, 1)
+            batch_parse_text(buffered_source)
+
+
+if __name__ == "__main__":
+    import sys
+
+    print("My New Test Parser (Parser Combinator Style)")
+    if sys.stdin.isatty():
+        interactive_parse()
+    else:
+        source_text = sys.stdin.read()
+        if source_text:
+            batch_parse_text(source_text)
