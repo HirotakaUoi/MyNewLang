@@ -476,7 +476,7 @@ class FunctionalTokenizer:
             _, cur = _take_while(cur, _is_digit)
             mantissa = src[start_idx:cur.index]
             value = int(mantissa)
-            if cur.index + 1 < len(src) and src[cur.index] == "E" and _is_digit(src[cur.index + 1]):
+            if cur.index + 1 < len(src) and src[cur.index] in ("E", "e") and _is_digit(src[cur.index + 1]):
                 cur = _advance(cur, 1)
                 exp_start = cur.index
                 _, cur = _take_while(cur, _is_digit)

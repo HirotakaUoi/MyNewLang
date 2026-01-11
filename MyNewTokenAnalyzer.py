@@ -453,7 +453,7 @@ class Tokenizer:
                     advance(1)
                 mantissa = source[start_i:i]
                 value = int(mantissa)
-                if i + 1 < length and source[i] == "E" and is_digit(source[i + 1]):
+                if i + 1 < length and source[i] in ("E", "e") and is_digit(source[i + 1]):
                     advance(1)  # consume E
                     exp_start = i
                     while i < length and is_digit(source[i]):

@@ -43,11 +43,12 @@ class FunctionalTokenizerTests(unittest.TestCase):
         self.assertEqual([(tokens[0][0], tokens[0][1])], [("STRING", "hello")])
 
     def test_number_literal(self):
-        src = "12 3E5"
+        src = "12 3E5 2e3"
         tokens = tokenize(src)
         self.assertEqual([(t[0], t[1]) for t in tokens], [
             ("NUMBER", 12),
             ("NUMBER", 300000),
+            ("NUMBER", 2000),
         ])
 
     def test_comment_included(self):
