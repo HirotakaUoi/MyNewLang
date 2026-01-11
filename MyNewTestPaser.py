@@ -845,7 +845,7 @@ class ParserSession:
             source_path, module_extension
         )
 
-    def feed_line(self, line):
+    def feed_line(self, line, parse_mode="stmt"):
         # 行単位で字句解析し、確定した文のASTのみを返す
         tokens, self.next_pos = tokenize_line(
             line,
@@ -863,22 +863,22 @@ class ParserSession:
         while self.tokens:
             parser = Parser(self.tokens, source_path=self.source_path, module_extension=self.module_extension)
             try:
-                first = parser.stream.peek()
-                if first is not None and first[0] in ("KEYWORD", "IDENT") and first[1] == "program":
+                if parse_mode == "program":
                     prog = parser.parse_program()
                     consumed = parser.stream.index
                     results.append(to_tuple(prog))
                     self.tokens = self.tokens[consumed:]
                     continue
+
                 expr = parser.parse_expression_optional()
                 if expr is None:
                     break
-                if parser.stream.match_punc(";"):
+                if parse_mode == "stmt" and parser.stream.match_punc(";"):
                     consumed = parser.stream.index
                     results.append(to_tuple(expr))
                     self.tokens = self.tokens[consumed:]
                     continue
-                if parser.stream.peek() is None:
+                if parse_mode == "expr" or parser.stream.peek() is None:
                     consumed = parser.stream.index
                     results.append(to_tuple(expr))
                     self.tokens = self.tokens[consumed:]
@@ -945,6 +945,7 @@ def interactive_parse():
     buffered_tokens = []
     first_prompt = True
     mode = "interactive"
+    parse_mode = "stmt"
     while True:
         try:
             if first_prompt:
@@ -981,9 +982,17 @@ def interactive_parse():
             mode = "interactive"
             print("Mode: interactive")
             continue
+        if stripped.startswith(":mode"):
+            parts = stripped.split()
+            if len(parts) == 2 and parts[1] in ("program", "stmt", "expr"):
+                parse_mode = parts[1]
+                print(f"Parse mode: {parse_mode}")
+            else:
+                print("Usage: :mode program|stmt|expr")
+            continue
 
         if mode == "interactive":
-            results, error_info = session.feed_line(line)
+            results, error_info = session.feed_line(line, parse_mode=parse_mode)
             for ast in results:
                 print(format_tuple_tree(ast))
             if error_info:
