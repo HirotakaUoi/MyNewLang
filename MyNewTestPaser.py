@@ -347,31 +347,11 @@ class Parser:
         self.infix_ops, self.prefix_ops, self.postfix_ops = _build_operator_table(
             source_path, module_extension
         )
-        _ops, pairs, _comments, _keywords = build_definition_set(
-            source_path, module_extension
-        )
-        self.pairs = list(pairs)
-        self.block_pairs = self._build_block_pairs(self.pairs)
-
-    def _build_block_pairs(self, pairs):
-        # ブロック候補として { } と、定義済みの括弧対から () [] を除いたものを使う
-        block_pairs = [("{", "}")]
-        for left, right in pairs:
-            if (left, right) in (("{", "}"), ("(", ")"), ("[", "]")):
-                continue
-            block_pairs.append((left, right))
-        return block_pairs
-
-    def _begin_tag(self, lexeme):
-        return f"BEGIN({lexeme})"
-
-    def _end_tag(self, lexeme):
-        return f"END({lexeme})"
+        self.pairs = []
 
     def _match_block_open(self):
-        for left, right in self.block_pairs:
-            if self.stream.match_lexeme(left):
-                return left, right
+        if self.stream.match("OP", "{"):
+            return "{", "}"
         return None
 
     def parse(self):
@@ -390,7 +370,7 @@ class Parser:
         pair = self._match_block_open()
         if pair is None:
             raise ParseError("Expected block start", self.stream.peek())
-        open_lexeme, close_lexeme = pair
+        _open_lexeme, close_lexeme = pair
         items = self.parse_statements(close_lexeme)
         _debug(f"parse_block: expect close={close_lexeme}, next={self.stream.peek()}")
         self.stream.expect_lexeme(close_lexeme)
@@ -499,8 +479,7 @@ class Parser:
             self.stream.consume()
             value = self.parse_expression_optional()
             return node("RETURN", value=value)
-        if self.stream.peek() and self.stream.peek()[1] in [p[0] for p in self.block_pairs]:
-            # ブロック
+        if self.stream.peek() and self.stream.peek()[0] == "OP" and self.stream.peek()[1] == "{":
             return self.parse_block()
         return self.parse_factor()
 
