@@ -88,7 +88,7 @@ def build_standard_keywords():
     ]
 
 
-def _strip_comment(line):
+def _strip_comment_from_def(line):
     """mydef の行から % コメントを除去する。"""
     in_quote = False
     for idx, ch in enumerate(line):
@@ -108,7 +108,7 @@ def parse_definition_lines(lines):
     keywords = []
 
     for raw in lines:
-        line = _strip_comment(raw)
+        line = _strip_comment_from_def(raw)
         if not line:
             continue
         if not line.endswith("."):
@@ -688,6 +688,6 @@ def tokenize_line(
 
 
 if __name__ == "__main__":
-    sample = "var $x = foo + 'bar' // comment\nx <- y"
+    sample = "{var $x = foo + 'bar'} // comment\nx <- y"
     for t in tokenize(sample, start_pos=(5, 5, 1)):
         print(t)
