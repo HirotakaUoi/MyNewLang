@@ -40,16 +40,20 @@ class TokenizeError(Exception):
 
 
 def _pos_to_tuple(pos: Position) -> PositionTuple:
+    """Position をタプルに変換する。"""
     return (pos.index, pos.line, pos.column)
 
 
 def _coerce_pos(pos: Union[Position, PositionTuple]) -> PositionTuple:
+    """Position またはタプルを (index, line, column) 形式に揃える。"""
     if isinstance(pos, Position):
         return _pos_to_tuple(pos)
     return pos
 
 
 def build_standard_operators():
+    """標準の演算子定義を返す。"""
+    # 標準の演算子定義（長いものほど優先される）
     return [
         "==", "!=", ">=", "<=", "&&", "||",
         "+=", "-=", "*=", "/=", "%=",
@@ -61,6 +65,8 @@ def build_standard_operators():
 
 
 def build_standard_pairs():
+    """標準の括弧対を返す。"""
+    # 括弧対（字句解析では OP として出力）
     return [
         ("(", ")"),
         ("{", "}"),
@@ -69,16 +75,21 @@ def build_standard_pairs():
 
 
 def build_standard_comments():
+    """標準のコメント開始記号を返す。"""
+    # 行コメントの開始記号
     return ["//"]
 
 
 def build_standard_keywords():
+    """標準キーワード一覧を返す。"""
+    # キーワード（前方一致はエラー）
     return [
         "break", "continue", "do", "else", "for", "if", "return", "while",
     ]
 
 
 def _strip_comment(line):
+    """mydef の行から % コメントを除去する。"""
     # % コメントを除去する（ただしシングルクォート内の % は無視する）
     in_quote = False
     for idx, ch in enumerate(line):
@@ -90,6 +101,8 @@ def _strip_comment(line):
 
 
 def parse_definition_lines(lines):
+    """定義ファイルの行から演算子/括弧対/コメント/キーワードを抽出する。"""
+    # .mydef から演算子/括弧対/コメント/キーワードを抽出する
     operators = []
     pairs = []
     comments = []
@@ -152,11 +165,13 @@ def parse_definition_lines(lines):
 
 
 def load_definitions_from_file(path):
+    """定義ファイルを読み込み、定義一覧を返す。"""
     with open(path, "r", encoding="utf-8") as f:
         return parse_definition_lines(f.readlines())
 
 
 def build_definition_set(source_path=None, module_extension=".mydef"):
+    """標準定義と同名 .mydef を統合した定義セットを返す。"""
     # 標準定義に加えて、ソースと同名の .mydef 定義を読み込んで拡張する
     operators = list(build_standard_operators())
     pairs = list(build_standard_pairs())
@@ -180,6 +195,7 @@ def build_definition_set(source_path=None, module_extension=".mydef"):
 
 class Tokenizer:
     def __init__(self, operators=None, pairs=None, comments=None, keywords=None):
+        """トークナイザを初期化する。"""
         if operators is None:
             operators = build_standard_operators()
         if pairs is None:
@@ -205,17 +221,21 @@ class Tokenizer:
         self._refresh_pair_lexemes()
 
     def _refresh_operator_list(self):
+        """演算子の最長一致用リストを再構築する。"""
         # 演算子集合から最長一致用の並びを再構築する
         self.operators = sorted(self._operator_set, key=len, reverse=True)
 
     def _refresh_comment_list(self):
+        """コメント開始記号の最長一致用リストを再構築する。"""
         # コメント開始記号の最長一致用の並びを再構築する
         self.comment_starters = sorted(self._comment_set, key=len, reverse=True)
 
     def _refresh_keyword_list(self):
+        """キーワード一覧を再構築する。"""
         self.keywords = sorted(self._keyword_set, key=len, reverse=True)
 
     def _refresh_pair_lexemes(self):
+        """括弧対の字面一覧を再構築する。"""
         lexemes = set()
         for left, right in self._pair_list:
             lexemes.add(left)
@@ -223,6 +243,7 @@ class Tokenizer:
         self._pair_lexemes = sorted(lexemes, key=len, reverse=True)
 
     def push_operator_update(self, add=None, remove=None):
+        """演算子定義を更新し、戻せるように退避する。"""
         # 現在の演算子集合を退避し、更新を適用する
         self._operator_stack.append(set(self._operator_set))
         if add:
@@ -232,6 +253,7 @@ class Tokenizer:
         self._refresh_operator_list()
 
     def pop_operator_update(self):
+        """直前の演算子更新を取り消す。"""
         # 直前の演算子更新を取り消す
         if not self._operator_stack:
             return False
@@ -240,6 +262,7 @@ class Tokenizer:
         return True
 
     def push_comment_update(self, add=None, remove=None):
+        """コメント開始記号を更新し、戻せるように退避する。"""
         # 現在のコメント開始記号を退避し、更新を適用する
         self._comment_stack.append(set(self._comment_set))
         if add:
@@ -249,6 +272,7 @@ class Tokenizer:
         self._refresh_comment_list()
 
     def pop_comment_update(self):
+        """直前のコメント更新を取り消す。"""
         # 直前のコメント更新を取り消す
         if not self._comment_stack:
             return False
@@ -257,6 +281,7 @@ class Tokenizer:
         return True
 
     def push_keyword_update(self, add=None, remove=None):
+        """キーワード定義を更新し、戻せるように退避する。"""
         self._keyword_stack.append(set(self._keyword_set))
         if add:
             self._keyword_set.update(add)
@@ -265,6 +290,7 @@ class Tokenizer:
         self._refresh_keyword_list()
 
     def pop_keyword_update(self):
+        """直前のキーワード更新を取り消す。"""
         if not self._keyword_stack:
             return False
         self._keyword_set = self._keyword_stack.pop()
@@ -272,6 +298,7 @@ class Tokenizer:
         return True
 
     def push_pair_update(self, add=None, remove=None):
+        """括弧対定義を更新し、戻せるように退避する。"""
         # 現在の括弧対を退避し、更新を適用する
         self._pair_stack.append(list(self._pair_list))
         if add:
@@ -282,6 +309,7 @@ class Tokenizer:
         self._refresh_pair_lexemes()
 
     def pop_pair_update(self):
+        """直前の括弧対更新を取り消す。"""
         # 直前の括弧対更新を取り消す
         if not self._pair_stack:
             return False
@@ -291,12 +319,15 @@ class Tokenizer:
         return True
 
     def tokenize(self, source, start_pos: PositionTuple = (0, 1, 1)) -> List[Tuple]:
+        """入力文字列をトークン列に変換する。"""
+        # 文字列を走査してトークン列に変換する
         tokens: List[Token] = []
         i = 0
         base_index, line, col = start_pos
         length = len(source)
 
         def current_pos():
+            # 入力全体での位置（index/line/column）を返す
             return Position(base_index + i, line, col)
 
         def advance(n=1):
@@ -313,6 +344,7 @@ class Tokenizer:
                 i += 1
 
         def emit(kind, value, start_pos, end_pos, extras: Optional[Dict[str, Any]] = None):
+            # トークンを追加する
             tokens.append(Token(kind, value, start_pos, end_pos, extras))
 
         def is_alpha(ch):
@@ -504,6 +536,7 @@ def tokenize(
     keywords=None,
     start_pos: PositionTuple = (0, 1, 1),
 ):
+    """入力文字列をトークン列に変換する（簡易API）。"""
     return Tokenizer(operators, pairs, comments, keywords).tokenize(source, start_pos)
 
 
@@ -514,6 +547,7 @@ def tokenize_with_definitions(
     keywords=None,
     start_pos: PositionTuple = (0, 1, 1),
 ):
+    """同名 .mydef を考慮して入力文字列をトークン化する。"""
     # ソースファイル名に基づいて標準+ローカル定義を読み込む
     operators, pairs, comments, def_keywords = build_definition_set(source_path, module_extension)
     if keywords:
@@ -528,6 +562,7 @@ def tokenize_lines(
     keywords=None,
     start_pos: PositionTuple = (0, 1, 1),
 ):
+    """複数行をまとめてトークン化する。"""
     source = "".join(lines)
     if source_path:
         return tokenize_with_definitions(
@@ -541,6 +576,7 @@ def tokenize_lines(
 
 
 def _advance_pos_by_text(start_pos: PositionTuple, text: str) -> PositionTuple:
+    """文字列を読み込んだ後の位置情報を計算する。"""
     idx, line, col = start_pos
     idx += len(text)
     if "\n" in text:
@@ -560,6 +596,7 @@ def tokenize_line(
     keywords=None,
     start_pos: PositionTuple = (0, 1, 1),
 ):
+    """1行だけトークン化し、次の開始位置も返す。"""
     tokens = tokenize(
         line,
         operators=operators,

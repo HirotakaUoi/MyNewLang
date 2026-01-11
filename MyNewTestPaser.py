@@ -52,6 +52,7 @@ def _make_snippet(source, pos_tuple, width=80):
 
 
 def _strip_comment(line):
+    """mydef の行から % コメントを除去する。"""
     # % コメントを除去する（クォート内の % は除外）
     in_quote = False
     for idx, ch in enumerate(line):
@@ -63,6 +64,7 @@ def _strip_comment(line):
 
 
 def _parse_op_defs(lines):
+    """mydef の op/3 を抽出して演算子定義を返す。"""
     # op('<lexeme>', <precedence>, <assoc>).
     result = []
     for raw in lines:
@@ -88,6 +90,7 @@ def _parse_op_defs(lines):
 
 
 def _load_module_ops(source_path, module_extension=".mydef"):
+    """同名 .mydef から演算子定義を読み込む。"""
     base_dir = os.path.dirname(source_path)
     base_name = os.path.splitext(os.path.basename(source_path))[0]
     module_path = os.path.join(base_dir, base_name + module_extension)
@@ -98,6 +101,7 @@ def _load_module_ops(source_path, module_extension=".mydef"):
 
 
 def _standard_ops():
+    """標準演算子の優先順位・結合性を返す。"""
     # 主要な演算子の優先順位と結合性（高いほど強い）
     return [
         ("=", 10, "xfy"),
@@ -130,6 +134,7 @@ def _standard_ops():
 
 
 def _build_operator_table(source_path=None, module_extension=".mydef"):
+    """演算子の優先順位表（infix/prefix/postfix）を構築する。"""
     op_specs = list(_standard_ops())
     if source_path:
         for lex, prec, assoc in _load_module_ops(source_path, module_extension):
@@ -150,6 +155,7 @@ def _build_operator_table(source_path=None, module_extension=".mydef"):
 
 
 def node(node_type: str, **fields):
+    """ASTノード（辞書）を生成する。"""
     data = {"type": node_type}
     data.update(fields)
     return data
@@ -208,6 +214,7 @@ _NODE_FIELDS = {
 
 
 def to_tuple(value):
+    """AST辞書をタプル形式に変換する。"""
     if value is None:
         return None
     if isinstance(value, list):
@@ -227,10 +234,12 @@ class TokenStream:
     index: int = 0
 
     def _skip_comments(self):
+        """COMMENT トークンを読み飛ばす。"""
         while self.index < len(self.tokens) and self.tokens[self.index][0] == "COMMENT":
             self.index += 1
 
     def peek(self, offset=0):
+        """現在位置のトークンを参照する（消費しない）。"""
         self._skip_comments()
         idx = self.index + offset
         if idx < len(self.tokens):
@@ -238,6 +247,7 @@ class TokenStream:
         return None
 
     def consume(self):
+        """現在位置のトークンを消費する。"""
         self._skip_comments()
         tok = self.peek()
         if tok is None:
@@ -246,6 +256,7 @@ class TokenStream:
         return tok
 
     def match(self, kind=None, value=None):
+        """条件に合うならトークンを消費して返す。"""
         tok = self.peek()
         if tok is None:
             return None
@@ -257,6 +268,7 @@ class TokenStream:
         return tok
 
     def expect(self, kind=None, value=None):
+        """条件に合うトークンが無ければエラー。"""
         tok = self.peek()
         if tok is None:
             raise ParseError("Unexpected EOF", None)
@@ -268,12 +280,15 @@ class TokenStream:
         return tok
 
     def match_punc(self, value):
+        """PUNC の一致を試行する。"""
         return self.match("PUNC", value)
 
     def expect_punc(self, value):
+        """PUNC を強制的に期待する。"""
         return self.expect("PUNC", value)
 
     def match_lexeme(self, value):
+        """OP/IDENT/KEYWORD をまとめて一致判定する。"""
         tok = self.peek()
         if tok is None:
             return None
@@ -286,6 +301,7 @@ class TokenStream:
         return None
 
     def expect_lexeme(self, value):
+        """OP/IDENT/KEYWORD をまとめて期待する。"""
         tok = self.peek()
         if tok is None:
             raise ParseError("Unexpected EOF", None)
@@ -298,6 +314,7 @@ class TokenStream:
         raise ParseError(f"Expected {value}", tok)
 
     def expect_word(self, word):
+        """キーワードまたは識別子の一致を期待する。"""
         tok = self.peek()
         if tok is None:
             raise ParseError("Unexpected EOF", None)
@@ -307,6 +324,7 @@ class TokenStream:
         raise ParseError(f"Expected keyword {word}", tok)
 
     def is_word(self, word):
+        """キーワード/識別子の一致を判定する。"""
         tok = self.peek()
         return tok is not None and tok[0] in ("KEYWORD", "IDENT") and tok[1] == word
 
@@ -343,6 +361,7 @@ _UNARY_OP_MAP = {
 
 class Parser:
     def __init__(self, tokens, source_path=None, module_extension=".mydef"):
+        """トークン列からASTを構築するパーサ。"""
         self.stream = TokenStream(tokens)
         self.infix_ops, self.prefix_ops, self.postfix_ops = _build_operator_table(
             source_path, module_extension
@@ -350,23 +369,27 @@ class Parser:
         self.pairs = []
 
     def _match_block_open(self):
+        """ブロック開始を確認し、対応する閉じを返す。"""
         if self.stream.match("OP", "{"):
             return "{", "}"
         return None
 
     def parse(self):
+        """program を先頭から解析する。"""
         prog = self.parse_program()
         if self.stream.peek() is not None:
             raise ParseError("Unexpected token after program", self.stream.peek())
         return prog
 
     def parse_program(self):
+        """program 構文を解析する。"""
         self.stream.expect_word("program")
         name_tok = self.stream.expect("IDENT")
         body = self.parse_block()
         return node("PROGRAM", name=name_tok[1], body=body)
 
     def parse_block(self):
+        """ブロック（{ ... }）を解析する。"""
         pair = self._match_block_open()
         if pair is None:
             raise ParseError("Expected block start", self.stream.peek())
@@ -377,6 +400,7 @@ class Parser:
         return node("BLOCK", items=items)
 
     def parse_statements(self, close_lexeme=None):
+        """セミコロン区切りの文リストを解析する。"""
         items = []
         if self.stream.peek() is None:
             return items
@@ -392,6 +416,7 @@ class Parser:
         return items
 
     def parse_expression_optional(self, close_lexeme=None):
+        """空式を許す式解析。"""
         tok = self.stream.peek()
         if tok is None:
             return None
@@ -402,6 +427,8 @@ class Parser:
         return self.parse_expression()
 
     def parse_expression(self, min_prec=0):
+        """優先順位付きの式を解析する。"""
+        # Pratt風の優先順位パース（prefix/infix/postfix）
         left = self.parse_prefix()
         while True:
             tok = self.stream.peek()
@@ -439,6 +466,7 @@ class Parser:
         return left
 
     def parse_prefix(self):
+        """前置演算子またはコア式を解析する。"""
         tok = self.stream.peek()
         if tok is not None and tok[0] == "OP" and tok[1] in self.prefix_ops:
             op = tok[1]
@@ -456,6 +484,7 @@ class Parser:
         return self.parse_core_expression()
 
     def parse_core_expression(self):
+        """構文キーワードやブロックなどの中核構文を解析する。"""
         if self.stream.is_word("await"):
             return self.parse_await()
         if self.stream.is_word("thread"):
@@ -484,6 +513,7 @@ class Parser:
         return self.parse_factor()
 
     def parse_if(self):
+        """if 文を解析する。"""
         self.stream.expect_word("if")
         self.stream.expect("OP", "(")
         cond = self.parse_expression()
@@ -496,6 +526,7 @@ class Parser:
         return node("IF", cond=cond, then=then, else_=else_expr)
 
     def parse_while(self):
+        """while 文を解析する。"""
         self.stream.expect_word("while")
         self.stream.expect("OP", "(")
         cond = self.parse_expression_optional()
@@ -504,6 +535,7 @@ class Parser:
         return node("WHILE", cond=cond, body=body)
 
     def parse_for(self):
+        """for 文を解析する。"""
         self.stream.expect_word("for")
         self.stream.expect("OP", "(")
         init = self.parse_expression_optional()
@@ -516,6 +548,7 @@ class Parser:
         return node("FOR", init=init, cond=cond, update=update, body=body)
 
     def parse_defun(self):
+        """関数定義を解析する。"""
         self.stream.expect_word("defun")
         name_tok = self.stream.expect("IDENT")
         self.stream.expect("OP", "(")
@@ -529,6 +562,7 @@ class Parser:
         return node("DEFUN", name=name_tok[1], params=params, body=body)
 
     def parse_func_param(self):
+        """関数仮引数を解析する。"""
         name_tok = self.stream.expect("IDENT")
         if self.stream.match("OP", "["):
             count = 0
@@ -539,6 +573,7 @@ class Parser:
         return node("VAR", name=name_tok[1])
 
     def parse_defvar(self):
+        """var 宣言を解析する。"""
         self.stream.expect_word("var")
         items = [self.parse_array_or_var()]
         while self.stream.match_punc(","):
@@ -546,11 +581,13 @@ class Parser:
         return node("DEFVAR", items=items)
 
     def parse_thread(self):
+        """thread 呼び出しを解析する。"""
         self.stream.expect_word("thread")
         call = self.parse_funcall()
         return node("THREAD", name=call["name"], args=call["args"])
 
     def parse_wait(self):
+        """wait 構文を解析する。"""
         self.stream.expect_word("wait")
         if self.stream.match("OP", "("):
             if self.stream.match("OP", ")"):
@@ -562,6 +599,7 @@ class Parser:
         return node("WAIT", value=value if value is not None else [])
 
     def parse_await(self):
+        """await 構文を解析する。"""
         self.stream.expect_word("await")
         target = self.parse_array_or_var()
         self.stream.expect("OP", "<-")
@@ -569,6 +607,7 @@ class Parser:
         return node("AWAIT", target=target, thread=thread_expr)
 
     def parse_factor(self):
+        """リテラル・変数・呼び出し・括弧式などを解析する。"""
         tok = self.stream.peek()
         if tok is None:
             raise ParseError("Unexpected EOF", None)
@@ -596,10 +635,12 @@ class Parser:
         raise ParseError("Unexpected token in factor", tok)
 
     def parse_funcall(self):
+        """関数呼び出しを解析する。"""
         name_tok = self.stream.expect("IDENT")
         return self.parse_funcall_from(name_tok[1])
 
     def parse_funcall_from(self, name):
+        """関数名を受け取って呼び出しを解析する。"""
         self.stream.expect("OP", "(")
         args = []
         if not self.stream.match("OP", ")"):
@@ -612,13 +653,16 @@ class Parser:
         return node("FUNCALL", name=name, args=args)
 
     def parse_array_or_var(self):
+        """配列アクセスか変数参照を解析する。"""
         name_tok = self.stream.expect("IDENT")
         if self.stream.peek() and self.stream.peek()[0] == "OP" and self.stream.peek()[1] == "[":
             return self.parse_array_from(name_tok[1])
         return node("VAR", name=name_tok[1])
 
     def parse_array_from(self, name):
+        """配列アクセスを解析する。"""
         self.stream.expect("OP", "[")
+        # 空添字を None として保持する（a[] / a[, ] など）
         indices = []
         expecting_expr = True
         while True:
@@ -641,6 +685,7 @@ class Parser:
         return node("ARRAY", name=name, dims=len(indices), indices=indices)
 
     def make_binary(self, op, left, right):
+        """2項演算のASTノードを生成する。"""
         op_type = _BIN_OP_MAP.get(op)
         if op_type:
             return node(op_type, left=left, right=right)
@@ -648,16 +693,19 @@ class Parser:
 
 
 def parse_tokens(tokens, source_path=None, module_extension=".mydef"):
+    """トークン列からASTタプルを生成する。"""
     parser = Parser(tokens, source_path=source_path, module_extension=module_extension)
     return to_tuple(parser.parse())
 
 
 def parse_tokens_ast(tokens, source_path=None, module_extension=".mydef"):
+    """トークン列からAST辞書を生成する。"""
     parser = Parser(tokens, source_path=source_path, module_extension=module_extension)
     return parser.parse()
 
 
 def parse(source, source_path=None, module_extension=".mydef", start_pos=(0, 1, 1)):
+    """文字列入力をバッチ解析する。"""
     tokens = tokenize_with_definitions(
         source, source_path=source_path or "", module_extension=module_extension, start_pos=start_pos
     )
@@ -665,6 +713,7 @@ def parse(source, source_path=None, module_extension=".mydef", start_pos=(0, 1, 
 
 
 def parse_lines(lines, source_path=None, module_extension=".mydef", start_pos=(0, 1, 1)):
+    """行リスト入力をバッチ解析する。"""
     tokens = tokenize_lines(
         lines, source_path=source_path, module_extension=module_extension, start_pos=start_pos
     )
@@ -672,12 +721,14 @@ def parse_lines(lines, source_path=None, module_extension=".mydef", start_pos=(0
 
 
 def parse_file(file_path, module_extension=".mydef", start_pos=(0, 1, 1)):
+    """ファイル入力をバッチ解析する。"""
     with open(file_path, "r", encoding="utf-8") as f:
         lines = f.readlines()
     return parse_lines(lines, source_path=file_path, module_extension=module_extension, start_pos=start_pos)
 
 
 def parse_ast(source, source_path=None, module_extension=".mydef", start_pos=(0, 1, 1)):
+    """文字列入力からAST辞書を生成する。"""
     tokens = tokenize_with_definitions(
         source, source_path=source_path or "", module_extension=module_extension, start_pos=start_pos
     )
@@ -685,6 +736,7 @@ def parse_ast(source, source_path=None, module_extension=".mydef", start_pos=(0,
 
 
 def _tree_lines(value, indent=0):
+    """辞書ASTを木構造の行列に変換する。"""
     pad = "  " * indent
     if value is None:
         return [pad + "None"]
@@ -715,10 +767,12 @@ def _tree_lines(value, indent=0):
 
 
 def format_tree(ast):
+    """辞書ASTを木構造で表示する。"""
     return "\n".join(_tree_lines(ast))
 
 
 def _tuple_tree_lines(value, indent=0):
+    """タプルASTを木構造の行列に変換する。"""
     pad = "  " * indent
     if value is None:
         return [pad + "None"]
@@ -775,11 +829,13 @@ def _tuple_tree_lines(value, indent=0):
 
 
 def format_tuple_tree(ast_tuple):
+    """タプルASTを木構造で表示する。"""
     return "\n".join(_tuple_tree_lines(ast_tuple))
 
 
 class ParserSession:
     def __init__(self, source_path=None, module_extension=".mydef", start_pos=(0, 1, 1)):
+        """行単位入力の解析セッションを初期化する。"""
         self.source_path = source_path
         self.module_extension = module_extension
         self.tokens = []
@@ -790,6 +846,7 @@ class ParserSession:
         )
 
     def feed_line(self, line):
+        # 行単位で字句解析し、確定した文のASTのみを返す
         tokens, self.next_pos = tokenize_line(
             line,
             operators=self.operators,
@@ -842,6 +899,8 @@ class ParserSession:
 
 
 def batch_parse_text(source_text, source_path=None, module_extension=".mydef", start_pos=(0, 1, 1)):
+    """文字列入力のバッチ解析結果を表示する。"""
+    # 一括入力のパース結果を表示する
     try:
         ast_tuple = parse(source_text, source_path=source_path, module_extension=module_extension, start_pos=start_pos)
         print(format_tuple_tree(ast_tuple))
@@ -865,6 +924,8 @@ def batch_parse_text(source_text, source_path=None, module_extension=".mydef", s
 
 
 def batch_parse_file(file_path, module_extension=".mydef", start_pos=(0, 1, 1)):
+    """ファイル入力のバッチ解析結果を表示する。"""
+    # ファイル入力のバッチ解析
     with open(file_path, "r", encoding="utf-8") as f:
         source_text = f.read()
     batch_parse_text(
@@ -876,6 +937,8 @@ def batch_parse_file(file_path, module_extension=".mydef", start_pos=(0, 1, 1)):
 
 
 def interactive_parse():
+    """対話モードで行単位解析を行う。"""
+    # 対話モード: 1行ずつ解析し、確定結果のみ出力する
     session = ParserSession()
     last_line = None
     buffered_source = ""

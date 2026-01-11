@@ -40,16 +40,20 @@ class TokenizeError(Exception):
 
 
 def _pos_to_tuple(pos: Position) -> PositionTuple:
+    """Position をタプルに変換する。"""
     return (pos.index, pos.line, pos.column)
 
 
 def _coerce_pos(pos: Union[Position, PositionTuple]) -> PositionTuple:
+    """Position またはタプルを (index, line, column) 形式に揃える。"""
     if isinstance(pos, Position):
         return _pos_to_tuple(pos)
     return pos
 
 
 def build_standard_operators():
+    """標準の演算子定義を返す。"""
+    # 標準の演算子定義（長いものほど優先される）
     return [
         "==", "!=", ">=", "<=", "&&", "||",
         "+=", "-=", "*=", "/=", "%=",
@@ -61,6 +65,8 @@ def build_standard_operators():
 
 
 def build_standard_pairs():
+    """標準の括弧対を返す。"""
+    # 括弧対（字句解析では OP として出力）
     return [
         ("(", ")"),
         ("{", "}"),
@@ -69,16 +75,21 @@ def build_standard_pairs():
 
 
 def build_standard_comments():
+    """標準のコメント開始記号を返す。"""
+    # 行コメントの開始記号
     return ["//"]
 
 
 def build_standard_keywords():
+    """標準キーワード一覧を返す。"""
+    # キーワード（前方一致はエラー）
     return [
         "break", "continue", "do", "else", "for", "if", "return", "while",
     ]
 
 
 def _strip_comment(line):
+    """mydef の行から % コメントを除去する。"""
     in_quote = False
     for idx, ch in enumerate(line):
         if ch == "'":
@@ -89,6 +100,8 @@ def _strip_comment(line):
 
 
 def parse_definition_lines(lines):
+    """定義ファイルの行から演算子/括弧対/コメント/キーワードを抽出する。"""
+    # .mydef から演算子/括弧対/コメント/キーワードを抽出する
     operators = []
     pairs = []
     comments = []
@@ -144,11 +157,13 @@ def parse_definition_lines(lines):
 
 
 def load_definitions_from_file(path):
+    """定義ファイルを読み込み、定義一覧を返す。"""
     with open(path, "r", encoding="utf-8") as f:
         return parse_definition_lines(f.readlines())
 
 
 def build_definition_set(source_path=None, module_extension=".mydef"):
+    """標準定義と同名 .mydef を統合した定義セットを返す。"""
     operators = list(build_standard_operators())
     pairs = list(build_standard_pairs())
     comments = list(build_standard_comments())
@@ -182,10 +197,12 @@ Parser = Callable[[State], Optional[Tuple[Any, State]]]
 
 
 def _current_pos(state: State) -> Position:
+    """状態から現在位置を Position で返す。"""
     return Position(state.offset + state.index, state.line, state.column)
 
 
 def _advance(state: State, n: int = 1) -> State:
+    """状態の読み取り位置を進める。"""
     idx = state.index
     line = state.line
     col = state.column
@@ -204,6 +221,7 @@ def _advance(state: State, n: int = 1) -> State:
 
 
 def _take_while(state: State, pred: Callable[[str], bool]) -> Tuple[str, State]:
+    """条件が成り立つ限り文字を消費する。"""
     src = state.source
     cur = state
     while cur.index < len(src) and pred(src[cur.index]):
@@ -212,6 +230,7 @@ def _take_while(state: State, pred: Callable[[str], bool]) -> Tuple[str, State]:
 
 
 def _p_map(parser: Parser, fn: Callable[[Any], Any]) -> Parser:
+    """パーサ結果に変換関数を適用する。"""
     def run(state: State):
         res = parser(state)
         if res is None:
@@ -222,6 +241,7 @@ def _p_map(parser: Parser, fn: Callable[[Any], Any]) -> Parser:
 
 
 def _p_or(*parsers: Parser) -> Parser:
+    """複数パーサのうち最初に成功したものを返す。"""
     def run(state: State):
         for parser in parsers:
             res = parser(state)
@@ -232,38 +252,47 @@ def _p_or(*parsers: Parser) -> Parser:
 
 
 def _is_alpha(ch: str) -> bool:
+    """英字判定。"""
     return ch.isalpha()
 
 
 def _is_digit(ch: str) -> bool:
+    """数字判定。"""
     return ch.isdigit()
 
 
 def _is_alnum(ch: str) -> bool:
+    """英数字判定。"""
     return ch.isalnum()
 
 
 def _is_unicode_symbol(ch: str) -> bool:
+    """Unicode記号（絵文字など）の判定。"""
     return unicodedata.category(ch) == "So"
 
 
 def _is_ident_start(ch: str) -> bool:
+    """識別子の先頭として使えるか判定する。"""
     return _is_alpha(ch) or ch == "_" or _is_unicode_symbol(ch)
 
 
 def _is_ident_char(ch: str) -> bool:
+    """識別子中に使えるか判定する。"""
     return _is_alnum(ch) or ch == "_" or _is_unicode_symbol(ch)
 
 
 def _is_dollar_ident_char(ch: str) -> bool:
+    """$識別子中に使えるか判定する。"""
     return _is_alnum(ch) or _is_unicode_symbol(ch)
 
 
 def _is_word_lexeme(lexeme: str) -> bool:
+    """語として扱うトークンか判定する。"""
     return bool(lexeme) and _is_ident_start(lexeme[0])
 
 
 def _check_word_boundary(state: State, lexeme: str) -> bool:
+    """語トークンの境界を確認する。"""
     if not _is_word_lexeme(lexeme):
         return True
     next_idx = state.index + len(lexeme)
@@ -274,6 +303,7 @@ def _check_word_boundary(state: State, lexeme: str) -> bool:
 
 class FunctionalTokenizer:
     def __init__(self, operators=None, pairs=None, comments=None, keywords=None):
+        """関数型トークナイザを初期化する。"""
         if operators is None:
             operators = build_standard_operators()
         if pairs is None:
@@ -297,15 +327,19 @@ class FunctionalTokenizer:
         self._refresh_pair_lexemes()
 
     def _refresh_operator_list(self):
+        """演算子の最長一致用リストを再構築する。"""
         self.operators = sorted(self._operator_set, key=len, reverse=True)
 
     def _refresh_comment_list(self):
+        """コメント開始記号の最長一致用リストを再構築する。"""
         self.comment_starters = sorted(self._comment_set, key=len, reverse=True)
 
     def _refresh_keyword_list(self):
+        """キーワード一覧を再構築する。"""
         self.keywords = sorted(self._keyword_set, key=len, reverse=True)
 
     def _refresh_pair_lexemes(self):
+        """括弧対の字面一覧を再構築する。"""
         lexemes = set()
         for left, right in self._pair_list:
             lexemes.add(left)
@@ -313,6 +347,7 @@ class FunctionalTokenizer:
         self._pair_lexemes = sorted(lexemes, key=len, reverse=True)
 
     def push_operator_update(self, add=None, remove=None):
+        """演算子定義を更新し、戻せるように退避する。"""
         self._operator_stack.append(set(self._operator_set))
         if add:
             self._operator_set.update(add)
@@ -321,6 +356,7 @@ class FunctionalTokenizer:
         self._refresh_operator_list()
 
     def pop_operator_update(self):
+        """直前の演算子更新を取り消す。"""
         if not self._operator_stack:
             return False
         self._operator_set = self._operator_stack.pop()
@@ -328,6 +364,7 @@ class FunctionalTokenizer:
         return True
 
     def push_comment_update(self, add=None, remove=None):
+        """コメント開始記号を更新し、戻せるように退避する。"""
         self._comment_stack.append(set(self._comment_set))
         if add:
             self._comment_set.update(add)
@@ -336,6 +373,7 @@ class FunctionalTokenizer:
         self._refresh_comment_list()
 
     def pop_comment_update(self):
+        """直前のコメント更新を取り消す。"""
         if not self._comment_stack:
             return False
         self._comment_set = self._comment_stack.pop()
@@ -343,6 +381,7 @@ class FunctionalTokenizer:
         return True
 
     def push_keyword_update(self, add=None, remove=None):
+        """キーワード定義を更新し、戻せるように退避する。"""
         self._keyword_stack.append(set(self._keyword_set))
         if add:
             self._keyword_set.update(add)
@@ -351,6 +390,7 @@ class FunctionalTokenizer:
         self._refresh_keyword_list()
 
     def pop_keyword_update(self):
+        """直前のキーワード更新を取り消す。"""
         if not self._keyword_stack:
             return False
         self._keyword_set = self._keyword_stack.pop()
@@ -358,6 +398,7 @@ class FunctionalTokenizer:
         return True
 
     def push_pair_update(self, add=None, remove=None):
+        """括弧対定義を更新し、戻せるように退避する。"""
         self._pair_stack.append(list(self._pair_list))
         if add:
             self._pair_list.extend(add)
@@ -367,6 +408,7 @@ class FunctionalTokenizer:
         self._refresh_pair_lexemes()
 
     def pop_pair_update(self):
+        """直前の括弧対更新を取り消す。"""
         if not self._pair_stack:
             return False
         self._pair_list = self._pair_stack.pop()
@@ -375,6 +417,7 @@ class FunctionalTokenizer:
         return True
 
     def _classify_identifier(self, value: str, start_pos: Position) -> str:
+        """識別子を IDENT/KEYWORD に分類する。"""
         if not self.keywords:
             return "IDENT"
         for kw in self.keywords:
@@ -385,6 +428,7 @@ class FunctionalTokenizer:
         return "IDENT"
 
     def _comment_parser(self) -> Parser:
+        """行コメントを解析するパーサを返す。"""
         def run(state: State):
             src = state.source
             matched = None
@@ -403,6 +447,7 @@ class FunctionalTokenizer:
         return run
 
     def _string_parser(self) -> Parser:
+        """文字列リテラルを解析するパーサを返す。"""
         def run(state: State):
             src = state.source
             if state.index >= len(src) or src[state.index] != '"':
@@ -420,6 +465,7 @@ class FunctionalTokenizer:
         return run
 
     def _number_parser(self) -> Parser:
+        """数値リテラルを解析するパーサを返す。"""
         def run(state: State):
             src = state.source
             if state.index >= len(src) or not _is_digit(src[state.index]):
@@ -440,6 +486,7 @@ class FunctionalTokenizer:
         return run
 
     def _quoted_ident_parser(self) -> Parser:
+        """クォート識別子を解析するパーサを返す。"""
         def run(state: State):
             src = state.source
             if state.index >= len(src) or src[state.index] != "'":
@@ -459,6 +506,7 @@ class FunctionalTokenizer:
         return run
 
     def _ident_parser(self) -> Parser:
+        """標準識別子を解析するパーサを返す。"""
         def run(state: State):
             src = state.source
             if state.index >= len(src) or not _is_ident_start(src[state.index]):
@@ -473,6 +521,7 @@ class FunctionalTokenizer:
         return run
 
     def _dollar_ident_parser(self) -> Parser:
+        """$識別子を解析するパーサを返す。"""
         def run(state: State):
             src = state.source
             if state.index >= len(src) or src[state.index] != "$":
@@ -489,6 +538,7 @@ class FunctionalTokenizer:
         return run
 
     def _operator_parser(self) -> Parser:
+        """演算子または PUNC を解析するパーサを返す。"""
         def run(state: State):
             src = state.source
             matched = None
@@ -507,6 +557,7 @@ class FunctionalTokenizer:
         return run
 
     def _pair_parser(self) -> Parser:
+        """括弧対の字面を OP として解析するパーサを返す。"""
         def run(state: State):
             src = state.source
             matched = None
@@ -522,6 +573,8 @@ class FunctionalTokenizer:
         return run
 
     def tokenize(self, source: str, start_pos: PositionTuple = (0, 1, 1)) -> List[Tuple]:
+        """入力文字列をトークン列に変換する。"""
+        # 入力文字列を走査してトークン列を生成する
         tokens: List[Token] = []
         base_index, base_line, base_col = start_pos
         state = State(source, 0, base_line, base_col, base_index)
@@ -562,6 +615,7 @@ def tokenize(
     keywords=None,
     start_pos: PositionTuple = (0, 1, 1),
 ):
+    """入力文字列をトークン列に変換する（簡易API）。"""
     return FunctionalTokenizer(operators, pairs, comments, keywords).tokenize(source, start_pos)
 
 
@@ -572,6 +626,7 @@ def tokenize_with_definitions(
     keywords=None,
     start_pos: PositionTuple = (0, 1, 1),
 ):
+    """同名 .mydef を考慮して入力文字列をトークン化する。"""
     operators, pairs, comments, def_keywords = build_definition_set(source_path, module_extension)
     if keywords:
         def_keywords = list(def_keywords) + list(keywords)
@@ -585,6 +640,7 @@ def tokenize_lines(
     keywords=None,
     start_pos: PositionTuple = (0, 1, 1),
 ):
+    """複数行をまとめてトークン化する。"""
     source = "".join(lines)
     if source_path:
         return tokenize_with_definitions(
@@ -598,6 +654,7 @@ def tokenize_lines(
 
 
 def _advance_pos_by_text(start_pos: PositionTuple, text: str) -> PositionTuple:
+    """文字列を読み込んだ後の位置情報を計算する。"""
     idx, line, col = start_pos
     idx += len(text)
     if "\n" in text:
@@ -617,6 +674,7 @@ def tokenize_line(
     keywords=None,
     start_pos: PositionTuple = (0, 1, 1),
 ):
+    """1行だけトークン化し、次の開始位置も返す。"""
     tokens = tokenize(
         line,
         operators=operators,
