@@ -74,6 +74,9 @@ python3 MyNewLang/MyNewTestPaser.py
 - `:batch` バッチモードに切り替え
 - `:interactive` 対話モードに戻す
 
+履歴:
+- 実行ファイル名と同名の `.history` に保存されます（最大100件）
+
 ## 定義ファイル形式（.mydef）
 
 定義は Prolog 風のディレクティブで記述し，ソースと同じベース名の

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
-from MyNewTokenAnalyzer import (
+from MyNewTokenAnalyzer_Functional import (
     build_definition_set,
     tokenize_line,
     tokenize_with_definitions,
@@ -31,7 +31,6 @@ def _format_token(tok):
         return "EOF"
     kind, value, start, end = tok
     return f"{kind} {value!r} at {start}"
-
 
 def _make_snippet(source, pos_tuple, width=80):
     idx, line, col = pos_tuple
@@ -945,7 +944,7 @@ def interactive_parse():
     buffered_tokens = []
     first_prompt = True
     mode = "interactive"
-    parse_mode = "stmt"
+    parse_mode = "expr"
     while True:
         try:
             if first_prompt:
@@ -960,12 +959,7 @@ def interactive_parse():
             buffered_tokens = list(session.tokens)
             if buffered_source or buffered_tokens:
                 print(f"Buffered {len(buffered_source)} chars, {len(buffered_tokens)} tokens.")
-            try:
-                sys.stdin = open("/dev/tty")
-                session.next_pos = (0, 1, 1)
-                continue
-            except OSError:
-                break
+            break
         if line == "\n":
             if last_line is None:
                 continue
@@ -1007,10 +1001,23 @@ def interactive_parse():
 
 if __name__ == "__main__":
     import sys
+    import os
+    import readline
 
     print("My New Test Parser (Parser Combinator Style)")
     if sys.stdin.isatty():
+        history_path = os.path.basename(sys.argv[0]) + ".history"
+        try:
+            if os.path.isfile(history_path):
+                readline.read_history_file(history_path)
+        except OSError:
+            pass
+        readline.set_history_length(100)
         interactive_parse()
+        try:
+            readline.write_history_file(history_path)
+        except OSError:
+            pass
     else:
         source_text = sys.stdin.read()
         if source_text:
